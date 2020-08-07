@@ -39,20 +39,20 @@ namespace StackExchange.Redis.Tests
             Assert.NotNull(masterOnlyMethod);
             object[] args = new object[1];
 
-            List<object> masterSlave = new List<object>();
+            List<object> masterReplica = new List<object>();
             List<object> masterOnly = new List<object>();
             foreach (var val in Enum.GetValues(cmd))
             {
                 args[0] = val;
                 bool isMasterOnly = (bool)masterOnlyMethod.Invoke(null, args);
-                (isMasterOnly ? masterOnly : masterSlave).Add(val);
+                (isMasterOnly ? masterOnly : masterReplica).Add(val);
 
                 if (!isMasterOnly)
                 {
                     Log(val?.ToString());
                 }
             }
-            Log("master-only: {0}, vs master/slave: {1}", masterOnly.Count, masterSlave.Count);
+            Log("master-only: {0}, vs master/replica: {1}", masterOnly.Count, masterReplica.Count);
             Log("");
             Log("master-only:");
             foreach (var val in masterOnly)
@@ -60,8 +60,8 @@ namespace StackExchange.Redis.Tests
                 Log(val?.ToString());
             }
             Log("");
-            Log("master/slave:");
-            foreach (var val in masterSlave)
+            Log("master/replica:");
+            foreach (var val in masterReplica)
             {
                 Log(val?.ToString());
             }
@@ -228,13 +228,30 @@ namespace StackExchange.Redis.Tests
             Assert.False(shortName.Contains("If"), fullName + ":If"); // should probably be a When option
 
             var returnType = method.ReturnType ?? typeof(void);
+
             if (isAsync)
             {
-                Assert.True(typeof(Task).IsAssignableFrom(returnType), fullName + ":Task");
+                Assert.True(IsAsyncMethod(returnType), fullName + ":Task");
             }
             else
             {
-                Assert.False(typeof(Task).IsAssignableFrom(returnType), fullName + ":Task");
+                Assert.False(IsAsyncMethod(returnType), fullName + ":Task");
+            }
+
+            static bool IsAsyncMethod(Type returnType)
+            {
+                if (returnType == typeof(Task)) return true;
+                if (returnType == typeof(ValueTask)) return true;
+
+                if (returnType.IsGenericType)
+                {
+                    var genDef = returnType.GetGenericTypeDefinition();
+                    if (genDef == typeof(Task<>)) return true;
+                    if (genDef == typeof(ValueTask<>)) return true;
+                    if (genDef == typeof(IAsyncEnumerable<>)) return true;
+                }
+
+                return false;
             }
         }
 

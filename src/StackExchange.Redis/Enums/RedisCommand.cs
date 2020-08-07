@@ -65,6 +65,7 @@
         HSCAN,
         HSET,
         HSETNX,
+        HSTRLEN,
         HVALS,
 
         INCR,
@@ -75,6 +76,7 @@
         KEYS,
 
         LASTSAVE,
+        LATENCY,
         LINDEX,
         LINSERT,
         LLEN,
@@ -86,6 +88,7 @@
         LSET,
         LTRIM,
 
+        MEMORY,
         MGET,
         MIGRATE,
         MONITOR,
@@ -117,6 +120,7 @@
         READWRITE,
         RENAME,
         RENAMENX,
+        REPLICAOF,
         RESTORE,
         RPOP,
         RPOPLPUSH,
@@ -158,6 +162,7 @@
         SYNC,
 
         TIME,
+        TOUCH,
         TTL,
         TYPE,
 

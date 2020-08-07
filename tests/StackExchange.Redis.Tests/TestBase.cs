@@ -38,16 +38,22 @@ namespace StackExchange.Redis.Tests
         protected void LogNoTime(string message) => LogNoTime(Writer, message);
         internal static void LogNoTime(TextWriter output, string message)
         {
-            output.WriteLine(message);
+            lock (output)
+            {
+                output.WriteLine(message);
+            }
             if (TestConfig.Current.LogToConsole)
             {
                 Console.WriteLine(message);
             }
         }
-        protected void Log(string message) => Log(Writer, message);
+        protected void Log(string message) => LogNoTime(Writer, message);
         public static void Log(TextWriter output, string message)
         {
-            output?.WriteLine(Time() + ": " + message);
+            lock (output)
+            {
+                output?.WriteLine(Time() + ": " + message);
+            }
             if (TestConfig.Current.LogToConsole)
             {
                 Console.WriteLine(message);
@@ -55,7 +61,10 @@ namespace StackExchange.Redis.Tests
         }
         protected void Log(string message, params object[] args)
         {
-            Output.WriteLine(Time() + ": " + message, args);
+            lock (Output)
+            {
+                Output.WriteLine(Time() + ": " + message, args);
+            }
             if (TestConfig.Current.LogToConsole)
             {
                 Console.WriteLine(message, args);
@@ -190,7 +199,7 @@ namespace StackExchange.Redis.Tests
             foreach (var endpoint in endpoints)
             {
                 var server = muxer.GetServer(endpoint);
-                if (server.IsSlave || !server.IsConnected) continue;
+                if (server.IsReplica || !server.IsConnected) continue;
                 if (result != null) throw new InvalidOperationException("Requires exactly one master endpoint (found " + server.EndPoint + " and " + result.EndPoint + ")");
                 result = server;
             }
@@ -203,7 +212,7 @@ namespace StackExchange.Redis.Tests
             foreach (var endpoint in muxer.GetEndPoints())
             {
                 var server = muxer.GetServer(endpoint);
-                if (!server.IsSlave) return server;
+                if (!server.IsReplica) return server;
             }
             throw new InvalidOperationException("Requires a master endpoint (found none)");
         }
@@ -215,7 +224,7 @@ namespace StackExchange.Redis.Tests
             bool checkConnect = true, string failMessage = null,
             string channelPrefix = null, Proxy? proxy = null,
             string configuration = null, bool logTransactionData = true,
-            bool shared = true,
+            bool shared = true, int? defaultDatabase = null,
             [CallerMemberName] string caller = null)
         {
             if (Output == null)
@@ -224,7 +233,7 @@ namespace StackExchange.Redis.Tests
             }
 
             if (shared && _fixture != null && _fixture.IsEnabled && enabledCommands == null && disabledCommands == null && fail && channelPrefix == null && proxy == null
-                && configuration == null && password == null && tieBreaker == null && (allowAdmin == null || allowAdmin == true) && expectedFailCount == 0)
+                && configuration == null && password == null && tieBreaker == null && defaultDatabase == null && (allowAdmin == null || allowAdmin == true) && expectedFailCount == 0)
             {
                 configuration = GetConfiguration();
                 if (configuration == _fixture.Configuration)
@@ -241,7 +250,7 @@ namespace StackExchange.Redis.Tests
                 checkConnect, failMessage,
                 channelPrefix, proxy,
                 configuration ?? GetConfiguration(),
-                logTransactionData, caller);
+                logTransactionData, defaultDatabase, caller);
             muxer.InternalError += OnInternalError;
             muxer.ConnectionFailed += OnConnectionFailed;
             return muxer;
@@ -255,6 +264,7 @@ namespace StackExchange.Redis.Tests
             bool checkConnect = true, string failMessage = null,
             string channelPrefix = null, Proxy? proxy = null,
             string configuration = null, bool logTransactionData = true,
+            int? defaultDatabase = null,
 
             [CallerMemberName] string caller = null)
         {
@@ -290,6 +300,7 @@ namespace StackExchange.Redis.Tests
                 if (keepAlive != null) config.KeepAlive = keepAlive.Value;
                 if (connectTimeout != null) config.ConnectTimeout = connectTimeout.Value;
                 if (proxy != null) config.Proxy = proxy.Value;
+                if (defaultDatabase != null) config.DefaultDatabase = defaultDatabase.Value;
                 var watch = Stopwatch.StartNew();
                 var task = ConnectionMultiplexer.ConnectAsync(config, log);
                 if (!task.Wait(config.ConnectTimeout >= (int.MaxValue / 2) ? int.MaxValue : config.ConnectTimeout * 2))
@@ -347,12 +358,13 @@ namespace StackExchange.Redis.Tests
 
         public static string Me([CallerFilePath] string filePath = null, [CallerMemberName] string caller = null) =>
 #if NET462
-            "net462-" + Path.GetFileNameWithoutExtension(filePath) + "-" + caller;
-#elif NETCOREAPP2_0
-            "netcoreapp2.0-" + Path.GetFileNameWithoutExtension(filePath) + "-" + caller;
+            "net462-"
+#elif NETCOREAPP2_1
+            "netcoreapp2.1-"
 #else
-            "unknown-" + Path.GetFileNameWithoutExtension(filePath) + "-" + caller;
+            "unknown-"
 #endif
+         + Path.GetFileNameWithoutExtension(filePath) + "-" + caller;
 
         protected static TimeSpan RunConcurrent(Action work, int threads, int timeout = 10000, [CallerMemberName] string caller = null)
         {
@@ -409,13 +421,15 @@ namespace StackExchange.Redis.Tests
             return watch.Elapsed;
         }
 
-        protected async Task UntilCondition(int maxMilliseconds, Func<bool> predicate, int perLoop = 100)
+        private static readonly TimeSpan DefaultWaitPerLoop = TimeSpan.FromMilliseconds(50);
+        protected async Task UntilCondition(TimeSpan maxWaitTime, Func<bool> predicate, TimeSpan? waitPerLoop = null)
         {
-            var spent = 0;
-            while (spent < maxMilliseconds && !predicate())
+            TimeSpan spent = TimeSpan.Zero;
+            while (spent < maxWaitTime && !predicate())
             {
-                await Task.Delay(perLoop).ForAwait();
-                spent += perLoop;
+                var wait = waitPerLoop ?? DefaultWaitPerLoop;
+                await Task.Delay(wait).ForAwait();
+                spent += wait;
             }
         }
     }

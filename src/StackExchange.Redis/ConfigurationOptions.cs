@@ -76,6 +76,7 @@ namespace StackExchange.Redis
                 HighPrioritySocketThreads = "highPriorityThreads",
                 KeepAlive = "keepAlive",
                 ClientName = "name",
+                User = "user",
                 Password = "password",
                 PreserveAsyncOrder = "preserveAsyncOrder",
                 Proxy = "proxy",
@@ -104,6 +105,7 @@ namespace StackExchange.Redis
                 DefaultDatabase,
                 HighPrioritySocketThreads,
                 KeepAlive,
+                User,
                 Password,
                 PreserveAsyncOrder,
                 Proxy,
@@ -128,7 +130,7 @@ namespace StackExchange.Redis
             }
         }
 
-        private bool? allowAdmin, abortOnConnectFail, highPrioritySocketThreads, resolveDns, ssl;
+        private bool? allowAdmin, abortOnConnectFail, highPrioritySocketThreads, resolveDns, ssl, checkCertificateRevocation;
 
         private string tieBreaker, sslHost, configChannel;
 
@@ -183,6 +185,11 @@ namespace StackExchange.Redis
         /// Automatically encodes and decodes channels
         /// </summary>
         public RedisChannel ChannelPrefix { get; set; }
+
+        /// <summary>
+        /// A Boolean value that specifies whether the certificate revocation list is checked during authentication.
+        /// </summary>
+        public bool CheckCertificateRevocation {get { return checkCertificateRevocation ?? true; } set { checkCertificateRevocation = value; }}
 
         /// <summary>
         /// Create a certificate validation check that checks against the supplied issuer even if not known by the machine
@@ -301,6 +308,11 @@ namespace StackExchange.Redis
 #pragma warning restore RCS1128 // Use coalesce expression.
 
         /// <summary>
+        /// The user to use to authenticate with the server.
+        /// </summary>
+        public string User { get; set; }
+
+        /// <summary>
         /// The password to use to authenticate with the server.
         /// </summary>
         public string Password { get; set; }
@@ -345,8 +357,8 @@ namespace StackExchange.Redis
         public string ServiceName { get; set; }
 
         /// <summary>
-        /// Gets or sets the SocketManager instance to be used with these options; if this is null a per-multiplexer
-        /// SocketManager is created automatically.
+        /// Gets or sets the SocketManager instance to be used with these options; if this is null a shared cross-multiplexer SocketManager
+        /// is used
         /// </summary>
         public SocketManager SocketManager { get; set; }
 
@@ -436,6 +448,7 @@ namespace StackExchange.Redis
                 allowAdmin = allowAdmin,
                 defaultVersion = defaultVersion,
                 connectTimeout = connectTimeout,
+                User = User,
                 Password = Password,
                 tieBreaker = tieBreaker,
                 writeBuffer = writeBuffer,
@@ -457,6 +470,7 @@ namespace StackExchange.Redis
                 DefaultDatabase = DefaultDatabase,
                 ReconnectRetryPolicy = reconnectRetryPolicy,
                 SslProtocols = SslProtocols,
+                checkCertificateRevocation = checkCertificateRevocation,
             };
             foreach (var item in EndPoints)
                 options.EndPoints.Add(item);
@@ -499,10 +513,12 @@ namespace StackExchange.Redis
             Append(sb, OptionKeys.AllowAdmin, allowAdmin);
             Append(sb, OptionKeys.Version, defaultVersion);
             Append(sb, OptionKeys.ConnectTimeout, connectTimeout);
+            Append(sb, OptionKeys.User, User);
             Append(sb, OptionKeys.Password, (includePassword || string.IsNullOrEmpty(Password)) ? Password : "*****");
             Append(sb, OptionKeys.TieBreaker, tieBreaker);
             Append(sb, OptionKeys.WriteBuffer, writeBuffer);
             Append(sb, OptionKeys.Ssl, ssl);
+            Append(sb, OptionKeys.SslProtocols, SslProtocols?.ToString().Replace(',', '|'));
             Append(sb, OptionKeys.SslHost, sslHost);
             Append(sb, OptionKeys.HighPrioritySocketThreads, highPrioritySocketThreads);
             Append(sb, OptionKeys.ConfigChannel, configChannel);
@@ -590,9 +606,10 @@ namespace StackExchange.Redis
 
         private void Clear()
         {
-            ClientName = ServiceName = Password = tieBreaker = sslHost = configChannel = null;
+            ClientName = ServiceName = User =Password = tieBreaker = sslHost = configChannel = null;
             keepAlive = syncTimeout = asyncTimeout = connectTimeout = writeBuffer = connectRetry = configCheckSeconds = DefaultDatabase = null;
             allowAdmin = abortOnConnectFail = highPrioritySocketThreads = resolveDns = ssl = null;
+            SslProtocols = null;
             defaultVersion = null;
             EndPoints.Clear();
             commandMap = null;
@@ -678,6 +695,9 @@ namespace StackExchange.Redis
                             break;
                         case OptionKeys.Version:
                             DefaultVersion = OptionKeys.ParseVersion(key, value);
+                            break;
+                        case OptionKeys.User:
+                            User = value;
                             break;
                         case OptionKeys.Password:
                             Password = value;

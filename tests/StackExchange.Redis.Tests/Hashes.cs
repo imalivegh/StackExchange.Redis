@@ -40,6 +40,55 @@ namespace StackExchange.Redis.Tests
         }
 
         [Fact]
+        public async Task ScanAsync()
+        {
+            using (var muxer = Create())
+            {
+                Skip.IfMissingFeature(muxer, nameof(RedisFeatures.Scan), r => r.Scan);
+                var conn = muxer.GetDatabase();
+                var key = Me();
+                await conn.KeyDeleteAsync(key);
+                for(int i = 0; i < 200; i++)
+                {
+                    await conn.HashSetAsync(key, "key" + i, "value " + i);
+                }
+
+                int count = 0;
+                // works for async
+                await foreach(var item in conn.HashScanAsync(key, pageSize: 20))
+                {
+                    count++;
+                }
+                Assert.Equal(200, count);
+
+                // and sync=>async (via cast)
+                count = 0;
+                await foreach (var item in (IAsyncEnumerable<HashEntry>)conn.HashScan(key, pageSize: 20))
+                {
+                    count++;
+                }
+                Assert.Equal(200, count);
+
+                // and sync (native)
+                count = 0;
+                foreach (var item in conn.HashScan(key, pageSize: 20))
+                {
+                    count++;
+                }
+                Assert.Equal(200, count);
+
+                // and async=>sync (via cast)
+                count = 0;
+                foreach (var item in (IEnumerable<HashEntry>)conn.HashScanAsync(key, pageSize: 20))
+                {
+                    count++;
+                }
+                Assert.Equal(200, count);
+
+            }
+        }
+
+        [Fact]
         public void Scan()
         {
             using (var muxer = Create())
@@ -522,6 +571,28 @@ namespace StackExchange.Redis.Tests
                 Assert.Equal(2, result.Count);
                 Assert.Equal("abc", result["foo"]);
                 Assert.Equal("def", result["bar"]);
+            }
+        }
+
+        [Fact]
+        public async Task TestWhenAlwaysAsync()
+        {
+            using (var muxer = Create())
+            {
+                var conn = muxer.GetDatabase();
+                var hashkey = Me();
+                conn.KeyDelete(hashkey, CommandFlags.FireAndForget);
+
+                var result1 = await conn.HashSetAsync(hashkey, "foo", "bar", When.Always, CommandFlags.None);
+                var result2 = await conn.HashSetAsync(hashkey, "foo2", "bar", When.Always, CommandFlags.None);
+                var result3 = await conn.HashSetAsync(hashkey, "foo", "bar", When.Always, CommandFlags.None);
+                var result4 = await conn.HashSetAsync(hashkey, "foo", "bar2", When.Always, CommandFlags.None);
+
+                Assert.True(result1, "Initial set key 1");
+                Assert.True(result2, "Initial set key 2");
+                // Fields modified *but not added* should be a zero/false. That's the behavior of HSET
+                Assert.False(result3, "Duplicate set key 1");
+                Assert.False(result4, "Duplicate se key 1 variant");
             }
         }
     }

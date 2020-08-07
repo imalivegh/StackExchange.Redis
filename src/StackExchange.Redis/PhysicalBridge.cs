@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipelines;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -165,7 +166,7 @@ namespace StackExchange.Redis
         }
 
         [Obsolete("prefer async")]
-        public WriteResult TryWriteSync(Message message, bool isSlave)
+        public WriteResult TryWriteSync(Message message, bool isReplica)
         {
             if (isDisposed) throw new ObjectDisposedException(Name);
             if (!IsConnected) return QueueOrFailMessage(message);
@@ -176,11 +177,11 @@ namespace StackExchange.Redis
 #pragma warning disable CS0618
             var result = WriteMessageTakingWriteLockSync(physical, message);
 #pragma warning restore CS0618
-            LogNonPreferred(message.Flags, isSlave);
+            LogNonPreferred(message.Flags, isReplica);
             return result;
         }
 
-        public ValueTask<WriteResult> TryWriteAsync(Message message, bool isSlave)
+        public ValueTask<WriteResult> TryWriteAsync(Message message, bool isReplica)
         {
             if (isDisposed) throw new ObjectDisposedException(Name);
             if (!IsConnected) return new ValueTask<WriteResult>(QueueOrFailMessage(message));
@@ -189,7 +190,7 @@ namespace StackExchange.Redis
             if (physical == null) return new ValueTask<WriteResult>(FailDueToNoConnection(message));
 
             var result = WriteMessageTakingWriteLockAsync(physical, message);
-            LogNonPreferred(message.Flags, isSlave);
+            LogNonPreferred(message.Flags, isReplica);
             return result;
         }
 
@@ -271,7 +272,7 @@ namespace StackExchange.Redis
                 {
                     try
                     {
-                        if ((await TryWriteAsync(next.Message, next.IsSlave).ForAwait()) != WriteResult.Success)
+                        if ((await TryWriteAsync(next.Message, next.IsReplica).ForAwait()) != WriteResult.Success)
                         {
                             next.Abort();
                         }
@@ -370,7 +371,7 @@ namespace StackExchange.Redis
                 Multiplexer.OnInfoMessage($"heartbeat ({physical?.LastWriteSecondsAgo}s >= {ServerEndPoint?.WriteEverySeconds}s, {physical?.GetSentAwaitingResponseCount()} waiting) '{msg.CommandAndKey}' on '{PhysicalName}' (v{features.Version})");
                 physical?.UpdateLastWriteTime(); // pre-emptively
 #pragma warning disable CS0618
-                var result = TryWriteSync(msg, ServerEndPoint.IsSlave);
+                var result = TryWriteSync(msg, ServerEndPoint.IsReplica);
 #pragma warning restore CS0618
 
                 if (result != WriteResult.Success)
@@ -611,7 +612,7 @@ namespace StackExchange.Redis
             if (condition) Multiplexer.Trace(message, ToString());
         }
 
-        internal bool TryEnqueue(List<Message> messages, bool isSlave)
+        internal bool TryEnqueue(List<Message> messages, bool isReplica)
         {
             if (messages == null || messages.Count == 0) return true;
 
@@ -631,19 +632,19 @@ namespace StackExchange.Redis
 #pragma warning disable CS0618
                 WriteMessageTakingWriteLockSync(physical, message);
 #pragma warning restore CS0618
-                LogNonPreferred(message.Flags, isSlave);
+                LogNonPreferred(message.Flags, isReplica);
             }
             return true;
         }
 
         private readonly MutexSlim _singleWriterMutex;
 
-        private Message _activeMesssage;
+        private Message _activeMessage;
 
         private WriteResult WriteMessageInsideLock(PhysicalConnection physical, Message message)
         {
             WriteResult result;
-            var existingMessage = Interlocked.CompareExchange(ref _activeMesssage, message, null);
+            var existingMessage = Interlocked.CompareExchange(ref _activeMessage, message, null);
             if (existingMessage != null)
             {
                 Multiplexer?.OnInfoMessage($"reentrant call to WriteMessageTakingWriteLock for {message.CommandAndKey}, {existingMessage.CommandAndKey} is still active");
@@ -737,12 +738,15 @@ namespace StackExchange.Redis
 #pragma warning restore CS0618
                 }
 
-                UnmarkActiveMessage(message);
                 physical.SetIdle();
                 return result;
             }
             catch (Exception ex) { return HandleWriteException(message, ex); }
-            finally { token.Dispose(); }
+            finally
+            {
+                UnmarkActiveMessage(message);
+                token.Dispose();
+            }
 
         }
 
@@ -765,7 +769,7 @@ namespace StackExchange.Redis
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void StartBacklogProcessor()
         {
-            var sched = Multiplexer.SocketManager?.SchedulerPool ?? DedicatedThreadPoolPipeScheduler.Default;
+            var sched = Multiplexer.SocketManager?.Scheduler ?? PipeScheduler.ThreadPool;
 #if DEBUG
             _backlogProcessorRequestedTime = Environment.TickCount;
 #endif
@@ -887,7 +891,6 @@ namespace StackExchange.Redis
                             }
 
                             _backlogStatus = BacklogStatus.MarkingInactive;
-                            UnmarkActiveMessage(message);
                             if (result != WriteResult.Success)
                             {
                                 _backlogStatus = BacklogStatus.RecordingWriteFailure;
@@ -900,6 +903,10 @@ namespace StackExchange.Redis
                     {
                         _backlogStatus = BacklogStatus.RecordingFault;
                         HandleWriteException(message, ex);
+                    }
+                    finally
+                    {
+                        UnmarkActiveMessage(message);
                     }
                 }
                 _backlogStatus = BacklogStatus.SettingIdle;
@@ -985,8 +992,7 @@ namespace StackExchange.Redis
 
                     result = flush.Result; // we know it was completed, this is fine
                 }
-
-                UnmarkActiveMessage(message);
+                
                 physical.SetIdle();
 
                 return new ValueTask<WriteResult>(result);
@@ -994,12 +1000,17 @@ namespace StackExchange.Redis
             catch (Exception ex) { return new ValueTask<WriteResult>(HandleWriteException(message, ex)); }
             finally
             {
-                if (releaseLock & token.Success)
+                if (token.Success)
                 {
+                    UnmarkActiveMessage(message);
+
+                    if (releaseLock)
+                    {
 #if DEBUG
-                    RecordLockDuration(lockTaken);
+                        RecordLockDuration(lockTaken);
 #endif
-                    token.Dispose();
+                        token.Dispose();
+                    }
                 }
             }
         }
@@ -1029,8 +1040,7 @@ namespace StackExchange.Redis
                     {
                         result = await physical.FlushAsync(false).ForAwait();
                     }
-
-                    UnmarkActiveMessage(message);
+                    
                     physical.SetIdle();
 
 #if DEBUG
@@ -1043,6 +1053,10 @@ namespace StackExchange.Redis
             {
                 return HandleWriteException(message, ex);
             }
+            finally
+            {
+                UnmarkActiveMessage(message);
+            }
         }
 
         private async ValueTask<WriteResult> CompleteWriteAndReleaseLockAsync(LockToken lockToken, ValueTask<WriteResult> flush, Message message, int lockTaken)
@@ -1052,7 +1066,6 @@ namespace StackExchange.Redis
                 try
                 {
                     var result = await flush.ForAwait();
-                    UnmarkActiveMessage(message);
                     physical.SetIdle();
                     return result;
                 }
@@ -1072,7 +1085,7 @@ namespace StackExchange.Redis
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UnmarkActiveMessage(Message message)
-            => Interlocked.CompareExchange(ref _activeMesssage, null, message); // remove if it is us
+            => Interlocked.CompareExchange(ref _activeMessage, null, message); // remove if it is us
 
         private State ChangeState(State newState)
         {
@@ -1133,18 +1146,18 @@ namespace StackExchange.Redis
             return physical;
         }
 
-        private void LogNonPreferred(CommandFlags flags, bool isSlave)
+        private void LogNonPreferred(CommandFlags flags, bool isReplica)
         {
             if ((flags & Message.InternalCallFlag) == 0) // don't log internal-call
             {
-                if (isSlave)
+                if (isReplica)
                 {
-                    if (Message.GetMasterSlaveFlags(flags) == CommandFlags.PreferMaster)
+                    if (Message.GetMasterReplicaFlags(flags) == CommandFlags.PreferMaster)
                         Interlocked.Increment(ref nonPreferredEndpointCount);
                 }
                 else
                 {
-                    if (Message.GetMasterSlaveFlags(flags) == CommandFlags.PreferSlave)
+                    if (Message.GetMasterReplicaFlags(flags) == CommandFlags.PreferReplica)
                         Interlocked.Increment(ref nonPreferredEndpointCount);
                 }
             }
@@ -1182,7 +1195,7 @@ namespace StackExchange.Redis
                 LastCommand = cmd;
                 bool isMasterOnly = message.IsMasterOnly();
 
-                if (isMasterOnly && ServerEndPoint.IsSlave && (ServerEndPoint.SlaveReadOnly || !ServerEndPoint.AllowSlaveWrites))
+                if (isMasterOnly && ServerEndPoint.IsReplica && (ServerEndPoint.ReplicaReadOnly || !ServerEndPoint.AllowReplicaWrites))
                 {
                     throw ExceptionFactory.MasterOnly(Multiplexer.IncludeDetailInExceptions, message.Command, message, ServerEndPoint);
                 }
@@ -1200,15 +1213,20 @@ namespace StackExchange.Redis
 
                 if (!connection.TransactionActive)
                 {
-                    var readmode = connection.GetReadModeCommand(isMasterOnly);
-                    if (readmode != null)
+                    // If we are executing AUTH, it means we are still unauthenticated
+                    // Setting READONLY before AUTH always fails but we think it succeeded since
+                    // we run it as Fire and Forget. 
+                    if (cmd != RedisCommand.AUTH)
                     {
-                        connection.EnqueueInsideWriteLock(readmode);
-                        readmode.WriteTo(connection);
-                        readmode.SetRequestSent();
-                        IncrementOpCount();
+                        var readmode = connection.GetReadModeCommand(isMasterOnly);
+                        if (readmode != null)
+                        {
+                            connection.EnqueueInsideWriteLock(readmode);
+                            readmode.WriteTo(connection);
+                            readmode.SetRequestSent();
+                            IncrementOpCount();
+                        }
                     }
-
                     if (message.IsAsking)
                     {
                         var asking = ReusableAskingCommand;
@@ -1296,6 +1314,6 @@ namespace StackExchange.Redis
             physical?.RecordConnectionFailed(ConnectionFailureType.SocketFailure);
         }
 
-        internal RedisCommand? GetActiveMessage() => Volatile.Read(ref _activeMesssage)?.Command;
+        internal RedisCommand? GetActiveMessage() => Volatile.Read(ref _activeMessage)?.Command;
     }
 }

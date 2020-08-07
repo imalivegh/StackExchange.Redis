@@ -123,9 +123,17 @@ namespace StackExchange.Redis.KeyspaceIsolation
             return Inner.HashLengthAsync(ToInner(key), flags);
         }
 
+        public IAsyncEnumerable<HashEntry> HashScanAsync(RedisKey key, RedisValue pattern, int pageSize, long cursor, int pageOffset, CommandFlags flags)
+            => Inner.HashScanAsync(ToInner(key), pattern, pageSize, cursor, pageOffset, flags);
+
         public Task<bool> HashSetAsync(RedisKey key, RedisValue hashField, RedisValue value, When when = When.Always, CommandFlags flags = CommandFlags.None)
         {
             return Inner.HashSetAsync(ToInner(key), hashField, value, when, flags);
+        }
+
+        public Task<long> HashStringLengthAsync(RedisKey key, RedisValue hashField, CommandFlags flags = CommandFlags.None)
+        {
+            return Inner.HashStringLengthAsync(ToInner(key), hashField, flags);
         }
 
         public Task HashSetAsync(RedisKey key, HashEntry[] hashFields, CommandFlags flags = CommandFlags.None)
@@ -213,7 +221,7 @@ namespace StackExchange.Redis.KeyspaceIsolation
             return Inner.KeyExpireAsync(ToInner(key), expiry, flags);
         }
 
-        public Task<TimeSpan?> KeyIdleTimeAsync(RedisKey key,CommandFlags flags = CommandFlags.None)
+        public Task<TimeSpan?> KeyIdleTimeAsync(RedisKey key, CommandFlags flags = CommandFlags.None)
         {
             return Inner.KeyIdleTimeAsync(ToInner(key), flags);
         }
@@ -378,12 +386,14 @@ namespace StackExchange.Redis.KeyspaceIsolation
 
         public Task<RedisResult> ScriptEvaluateAsync(LuaScript script, object parameters = null, CommandFlags flags = CommandFlags.None)
         {
-            return Inner.ScriptEvaluateAsync(script, parameters, flags);
+            // TODO: The return value could contain prefixed keys. It might make sense to 'unprefix' those?
+            return script.EvaluateAsync(Inner, parameters, Prefix, flags);
         }
 
         public Task<RedisResult> ScriptEvaluateAsync(LoadedLuaScript script, object parameters = null, CommandFlags flags = CommandFlags.None)
         {
-            return Inner.ScriptEvaluateAsync(script, parameters, flags);
+            // TODO: The return value could contain prefixed keys. It might make sense to 'unprefix' those?
+            return script.EvaluateAsync(Inner, parameters, Prefix, flags);
         }
 
         public Task<long> SetAddAsync(RedisKey key, RedisValue[] values, CommandFlags flags = CommandFlags.None)
@@ -460,6 +470,9 @@ namespace StackExchange.Redis.KeyspaceIsolation
         {
             return Inner.SetRemoveAsync(ToInner(key), values, flags);
         }
+
+        public IAsyncEnumerable<RedisValue> SetScanAsync(RedisKey key, RedisValue pattern, int pageSize, long cursor, int pageOffset, CommandFlags flags)
+            => Inner.SetScanAsync(ToInner(key), pattern, pageSize, cursor, pageOffset, flags);
 
         public Task<bool> SetRemoveAsync(RedisKey key, RedisValue value, CommandFlags flags = CommandFlags.None)
         {
@@ -591,6 +604,9 @@ namespace StackExchange.Redis.KeyspaceIsolation
             return Inner.SortedSetScoreAsync(ToInner(key), member, flags);
         }
 
+        public IAsyncEnumerable<SortedSetEntry> SortedSetScanAsync(RedisKey key, RedisValue pattern, int pageSize, long cursor, int pageOffset, CommandFlags flags)
+            => Inner.SortedSetScanAsync(ToInner(key), pattern, pageSize, cursor, pageOffset, flags);
+
         public Task<SortedSetEntry?> SortedSetPopAsync(RedisKey key, Order order = Order.Ascending, CommandFlags flags = CommandFlags.None)
         {
             return Inner.SortedSetPopAsync(ToInner(key), order, flags);
@@ -636,9 +652,14 @@ namespace StackExchange.Redis.KeyspaceIsolation
             return Inner.StreamConsumerGroupSetPositionAsync(ToInner(key), groupName, position, flags);
         }
 
-        public Task<bool> StreamCreateConsumerGroupAsync(RedisKey key, RedisValue groupName, RedisValue? position = null, CommandFlags flags = CommandFlags.None)
+        public Task<bool> StreamCreateConsumerGroupAsync(RedisKey key, RedisValue groupName, RedisValue? position, CommandFlags flags)
         {
             return Inner.StreamCreateConsumerGroupAsync(ToInner(key), groupName, position, flags);
+        }
+
+        public Task<bool> StreamCreateConsumerGroupAsync(RedisKey key, RedisValue groupName, RedisValue? position = null, bool createStream = true, CommandFlags flags = CommandFlags.None)
+        {
+            return Inner.StreamCreateConsumerGroupAsync(ToInner(key), groupName, position, createStream, flags);
         }
 
         public Task<StreamInfo> StreamInfoAsync(RedisKey key, CommandFlags flags = CommandFlags.None)
@@ -701,14 +722,24 @@ namespace StackExchange.Redis.KeyspaceIsolation
             return Inner.StreamReadAsync(streamPositions, countPerStream, flags);
         }
 
-        public Task<StreamEntry[]> StreamReadGroupAsync(RedisKey key, RedisValue groupName, RedisValue consumerName, RedisValue? position = null, int? count = null, CommandFlags flags = CommandFlags.None)
+        public Task<StreamEntry[]> StreamReadGroupAsync(RedisKey key, RedisValue groupName, RedisValue consumerName, RedisValue? position, int? count, CommandFlags flags)
         {
             return Inner.StreamReadGroupAsync(ToInner(key), groupName, consumerName, position, count, flags);
         }
 
-        public Task<RedisStream[]> StreamReadGroupAsync(StreamPosition[] streamPositions, RedisValue groupName, RedisValue consumerName, int? countPerStream = null, CommandFlags flags = CommandFlags.None)
+        public Task<StreamEntry[]> StreamReadGroupAsync(RedisKey key, RedisValue groupName, RedisValue consumerName, RedisValue? position = null, int? count = null, bool noAck = false, CommandFlags flags = CommandFlags.None)
+        {
+            return Inner.StreamReadGroupAsync(ToInner(key), groupName, consumerName, position, count, noAck, flags);
+        }
+
+        public Task<RedisStream[]> StreamReadGroupAsync(StreamPosition[] streamPositions, RedisValue groupName, RedisValue consumerName, int? countPerStream, CommandFlags flags)
         {
             return Inner.StreamReadGroupAsync(streamPositions, groupName, consumerName, countPerStream, flags);
+        }
+
+        public Task<RedisStream[]> StreamReadGroupAsync(StreamPosition[] streamPositions, RedisValue groupName, RedisValue consumerName, int? countPerStream = null, bool noAck = false, CommandFlags flags = CommandFlags.None)
+        {
+            return Inner.StreamReadGroupAsync(streamPositions, groupName, consumerName, countPerStream, noAck, flags);
         }
 
         public Task<long> StreamTrimAsync(RedisKey key, int maxLength, bool useApproximateMaxLength = false, CommandFlags flags = CommandFlags.None)
@@ -826,6 +857,17 @@ namespace StackExchange.Redis.KeyspaceIsolation
             return Inner.PingAsync(flags);
         }
 
+
+        public Task<long> KeyTouchAsync(RedisKey[] keys, CommandFlags flags = CommandFlags.None)
+        {
+            return Inner.KeyTouchAsync(ToInner(keys), flags);
+        }
+
+        public Task<bool> KeyTouchAsync(RedisKey key, CommandFlags flags = CommandFlags.None)
+        {
+            return Inner.KeyTouchAsync(ToInner(key), flags);
+        }
+
         public bool TryWait(Task task)
         {
             return Inner.TryWait(task);
@@ -868,12 +910,12 @@ namespace StackExchange.Redis.KeyspaceIsolation
             {
                 var withPrefix = new object[args.Count];
                 int i = 0;
-                foreach(var oldArg in args)
+                foreach (var oldArg in args)
                 {
                     object newArg;
                     if (oldArg is RedisKey key)
                     {
-                        newArg    = ToInner(key);
+                        newArg = ToInner(key);
                     }
                     else if (oldArg is RedisChannel channel)
                     {

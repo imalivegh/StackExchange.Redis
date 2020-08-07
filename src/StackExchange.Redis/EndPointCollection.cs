@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Net;
@@ -8,7 +9,7 @@ namespace StackExchange.Redis
     /// <summary>
     /// A list of endpoints
     /// </summary>
-    public sealed class EndPointCollection : Collection<EndPoint>
+    public sealed class EndPointCollection : Collection<EndPoint>, IEnumerable<EndPoint>
     {
         /// <summary>
         /// Create a new EndPointCollection
@@ -59,6 +60,26 @@ namespace StackExchange.Redis
         public void Add(IPAddress host, int port) => Add(new IPEndPoint(host, port));
 
         /// <summary>
+        /// Try adding a new endpoint to the list.
+        /// </summary>
+        /// <param name="endpoint">The endpoint to add.</param>
+        /// <returns>True if the endpoint was added or false if not.</returns>
+        public bool TryAdd(EndPoint endpoint)
+        {
+            if (endpoint == null) throw new ArgumentNullException(nameof(endpoint));
+
+            if (!Contains(endpoint))
+            {
+                base.InsertItem(Count, endpoint);
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// See Collection&lt;T&gt;.InsertItem()
         /// </summary>
         /// <param name="index">The index to add <paramref name="item"/> into the collection at.</param>
@@ -107,6 +128,22 @@ namespace StackExchange.Redis
                     this[i] = new IPEndPoint(ip.Address, defaultPort);
                     continue;
                 }
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+        IEnumerator<EndPoint> IEnumerable<EndPoint>.GetEnumerator() => GetEnumerator();
+
+        /// <inheritdoc/>
+        public new IEnumerator<EndPoint> GetEnumerator()
+        {
+            // this does *not* need to handle all threading scenarios; but we do
+            // want it to at least allow overwrites of existing endpoints without
+            // breaking the enumerator; in particular, this avoids a problem where
+            // ResolveEndPointsAsync swaps the addresses on us
+            for (int i = 0; i < Count; i++)
+            {
+                yield return this[i];
             }
         }
     }

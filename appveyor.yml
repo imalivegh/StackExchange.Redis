@@ -1,9 +1,12 @@
 image:
-- Visual Studio 2017
+- Visual Studio 2019
 - Ubuntu
 
 init:
   - git config --global core.autocrlf input
+
+services: 
+- docker 
 
 install:
 - cmd: >-
@@ -11,13 +14,13 @@ install:
 
     redis-server.exe --service-install --service-name "redis-6379" "..\Basic\master-6379.conf"
 
-    redis-server.exe --service-install --service-name "redis-6380" "..\Basic\slave-6380.conf"
+    redis-server.exe --service-install --service-name "redis-6380" "..\Basic\replica-6380.conf"
 
     redis-server.exe --service-install --service-name "redis-6381" "..\Basic\secure-6381.conf"
 
     redis-server.exe --service-install --service-name "redis-6382" "..\Failover\master-6382.conf"
 
-    redis-server.exe --service-install --service-name "redis-6383" "..\Failover\slave-6383.conf"
+    redis-server.exe --service-install --service-name "redis-6383" "..\Failover\replica-6383.conf"
 
     redis-server.exe --service-install --service-name "redis-7000" "..\Cluster\cluster-7000.conf" --dir "..\Cluster"
 
@@ -38,14 +41,20 @@ install:
     redis-server.exe --service-install --service-name "redis-26379" "..\Sentinel\sentinel-26379.conf" --sentinel
 
     redis-server.exe --service-install --service-name "redis-26380" "..\Sentinel\sentinel-26380.conf" --sentinel
+    
+    redis-server.exe --service-install --service-name "redis-26381" "..\Sentinel\sentinel-26381.conf" --sentinel
 
     cd ..\..\..
 - sh: >-
+    sudo curl -L https://github.com/docker/compose/releases/download/1.26.0/docker-compose-`uname -s`-`uname -m` -o /usr/local/bin/docker-compose
+
+    sudo chmod +x /usr/local/bin/docker-compose
+
+    sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
+
     cd tests/RedisConfigs
 
-    chmod +x start-all.sh
-
-    ./start-all.sh
+    docker-compose up -d
 
     cd ../..
 - ps: >-
@@ -68,10 +77,6 @@ nuget:
   disable_publish_on_pr: true
 
 build_script:
-- ps: >-
-    if ($env:OS -eq "Windows_NT") {
-      .\build\dotnet-install.ps1 -Version 2.1.500
-    }
 - ps: .\build.ps1 -PullRequestNumber "$env:APPVEYOR_PULL_REQUEST_NUMBER" -CreatePackages ($env:OS -eq "Windows_NT")
 
 test: off
@@ -82,7 +87,7 @@ deploy:
 - provider: NuGet
   server: https://www.myget.org/F/stackoverflow/api/v2
   on:
-    branch: master
+    branch: main
   api_key:
     secure: P/UHxq2DEs0GI1SoDXDesHjRVsSVgdywz5vmsnhFQQY5aJgO3kP+QfhwfhXz19Rw
   symbol_server: https://www.myget.org/F/stackoverflow/symbols/api/v2/package

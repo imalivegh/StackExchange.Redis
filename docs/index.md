@@ -37,10 +37,12 @@ Documentation
 - [Transactions](Transactions) - how atomic transactions work in redis
 - [Events](Events) - the events available for logging / information purposes
 - [Pub/Sub Message Order](PubSubOrder) - advice on sequential and concurrent processing
+- [Streams](Streams) - how to use the Stream data type
 - [Where are `KEYS` / `SCAN` / `FLUSH*`?](KeysScan) - how to use server-based commands
 - [Profiling](Profiling) - profiling interfaces, as well as how to profile in an `async` world
 - [Scripting](Scripting) - running Lua scripts with convenient named parameter replacement
 - [Testing](Testing) - running the `StackExchange.Redis.Tests` suite to validate changes
+- [Thread Theft](ThreadTheft) - guidance on avoiding TPL threading problems
 
 Questions and Contributions
 ---

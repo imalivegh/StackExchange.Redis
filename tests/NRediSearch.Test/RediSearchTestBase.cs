@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using StackExchange.Redis;
+using StackExchange.Redis.Tests;
 using Xunit.Abstractions;
 
 namespace NRediSearch.Test
@@ -26,37 +27,90 @@ namespace NRediSearch.Test
             Db = null;
         }
 
-        protected Client GetClient([CallerMemberName] string caller = null)
-            => Reset(new Client(GetType().Name + ":" + caller, Db));
-
-        protected static Client Reset(Client client)
+        protected Client GetClient([CallerFilePath] string filePath = null, [CallerMemberName] string caller = null)
         {
-            try
+            // Remove all that extra pathing
+            var offset = filePath?.IndexOf("NRediSearch.Test");
+            if (offset > -1)
             {
-                client.DropIndex(); // tests create them
+                filePath = filePath.Substring(offset.Value + "NRediSearch.Test".Length + 1);
             }
-            catch (RedisServerException ex)
-            {
-                if (ex.Message != "Unknown Index name") throw;
-            }
+
+            var indexName = $"{filePath}:{caller}";
+            Output.WriteLine("Using Index: " + indexName);
+            var exists = Db.KeyExists("idx:" + indexName);
+            Output.WriteLine("Key existed: " + exists);
+
+            var client = new Client(indexName, Db);
+            var wasReset = Reset(client);
+            Output.WriteLine("Index was reset?: " + wasReset);
             return client;
         }
 
+        protected bool Reset(Client client)
+        {
+            Output.WriteLine("Resetting index");
+            try
+            {
+                var result = client.DropIndex(); // tests create them
+                Output.WriteLine("  Result: " + result);
+                return result;
+            }
+            catch (RedisServerException ex)
+            {
+                if (string.Equals("Unknown Index name", ex.Message, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    Output.WriteLine("  Unknown index name");
+                    return true;
+                }
+                if (string.Equals("no such index", ex.Message, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    Output.WriteLine("  No such index");
+                    return true;
+                }
+                else
+                {
+                    throw;
+                }
+            }
+        }
+
+        private static bool instanceMissing = false;
+
         internal static ConnectionMultiplexer GetWithFT(ITestOutputHelper output)
         {
-            const string ep = "127.0.0.1:6379";
             var options = new ConfigurationOptions
             {
-                EndPoints = { ep },
+                EndPoints = { TestConfig.Current.RediSearchServerAndPort },
                 AllowAdmin = true,
+                ConnectTimeout = 2000,
                 SyncTimeout = 15000,
             };
-            var conn = ConnectionMultiplexer.Connect(options);
-            conn.MessageFaulted += (msg, ex, origin) => output.WriteLine($"Faulted from '{origin}': '{msg}' - '{(ex == null ? "(null)" : ex.Message)}'");
-            conn.Connecting += (e, t) => output.WriteLine($"Connecting to {Format.ToString(e)} as {t}");
-            conn.Closing += complete => output.WriteLine(complete ? "Closed" : "Closing...");
+            static void InstanceMissing() => Skip.Inconclusive("NRedisSearch instance available at " + TestConfig.Current.RediSearchServerAndPort);
+            // Don't timeout every single test - optimization
+            if (instanceMissing)
+            {
+                InstanceMissing();
+            }
 
-            var server = conn.GetServer(ep);
+            ConnectionMultiplexer conn = null;
+            try
+            {
+                conn = ConnectionMultiplexer.Connect(options);
+                conn.MessageFaulted += (msg, ex, origin) => output.WriteLine($"Faulted from '{origin}': '{msg}' - '{(ex == null ? "(null)" : ex.Message)}'");
+                conn.Connecting += (e, t) => output.WriteLine($"Connecting to {Format.ToString(e)} as {t}");
+                conn.Closing += complete => output.WriteLine(complete ? "Closed" : "Closing...");
+            }
+            catch (RedisConnectionException)
+            {
+                instanceMissing = true;
+                InstanceMissing();
+            }
+
+            // If say we're on a 3.x Redis server...bomb out.
+            Skip.IfMissingFeature(conn, nameof(RedisFeatures.Module), r => r.Module);
+
+            var server = conn.GetServer(TestConfig.Current.RediSearchServerAndPort);
             var arr = (RedisResult[])server.Execute("module", "list");
             bool found = false;
             foreach (var module in arr)
@@ -73,22 +127,8 @@ namespace NRediSearch.Test
 
             if (!found)
             {
-                output?.WriteLine("Module not found; attempting to load...");
-                var config = server.Info("server").SelectMany(_ => _).FirstOrDefault(x => x.Key == "config_file").Value;
-                if (!string.IsNullOrEmpty(config))
-                {
-                    var i = config.LastIndexOf('/');
-                    var modulePath = config.Substring(0, i + 1) + "redisearch.so";
-                    try
-                    {
-                        var result = server.Execute("module", "load", modulePath);
-                        output?.WriteLine((string)result);
-                    } catch(RedisServerException err)
-                    {
-                        // *probably* duplicate load; we'll try the tests anyways!
-                        output?.WriteLine(err.Message);
-                    }
-                }
+                output?.WriteLine("Module not found.");
+                throw new RedisException("NRedisSearch module missing on " + TestConfig.Current.RediSearchServerAndPort);
             }
             return conn;
         }
@@ -104,6 +144,16 @@ namespace NRediSearch.Test
                 data[key] = value;
             }
             return data;
+        }
+
+        protected bool IsMissingIndexException(Exception ex)
+        {
+            if (ex.Message == null)
+            {
+                return false;
+            }
+            return ex.Message.Contains("Unknown Index name", StringComparison.InvariantCultureIgnoreCase)
+                || ex.Message.Contains("no such index", StringComparison.InvariantCultureIgnoreCase);
         }
     }
 }

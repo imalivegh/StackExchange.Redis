@@ -1,8 +1,79 @@
 # Release Notes
 
+## 2.1.58
+
+- fix: `[*]SCAN` - fix possible NRE scenario if the iterator is disposed with an incomplete operation in flight
+- fix: `[*]SCAN` - treat the cursor as an opaque value whenever possible, for compatibility with `redis-cluster-proxy`
+- add: `[*]SCAN` - include additional exception data in the case of faults
+
+## 2.1.55
+
+- identify assembly binding problem on .NET Framework; drops `System.IO.Pipelines` to 4.7.1, and identifies new `System.Buffers` binding failure on 4.7.2
+
+## 2.1.50
+
+- add: bind direct to sentinel-managed instances from a configuration string/object (#1431 via ejsmith)
+- add last-delivered-id to `StreamGroupInfo` (#1477 via AndyPook)
+- update naming of replication-related commands to reflect Redis 5 naming (#1488/#945)
+- fix: the `IServer` commands that are database-specific (`DBSIZE`, `FLUSHDB`, `KEYS`, `SCAN`) now respect the default database on the config (#1460)
+- library updates
+
+## 2.1.39
+
+- fix: mutex around connection was not "fair"; in specific scenario could lead to out-of-order commands (#1440)
+- fix: update libs (#1432)
+- fix: timing error on linux (#1433 via pengweiqhca)
+- fix: add `auth` to command-map for sentinal (#1428 via ejsmith)
+
+## 2.1.30
+
+- fix deterministic builds
+
+## 2.1.28
+
+- fix: stability in new sentinel APIs
+- fix: include `SslProtocolos` in `ConfigurationOptions.ToString()` (#1408 via vksampath and Sampath Vuyyuru
+- fix: clarify messaging around disconnected multiplexers (#1396)
+- change: tweak methods of new sentinel API (this is technically a breaking change, but since this is a new API that was pulled quickly, we consider this to be acceptable)
+- add: new thread`SocketManager` mode (opt-in) to always use the regular thread-pool instead of the dedicated pool
+- add: improved counters in/around error messages
+- add: new `User` property on `ConfigurationOptions`
+- build: enable deterministic builds (note: this failed; fixed in 2.1.30)
+
+## 2.1.0
+
+- fix: ensure active-message is cleared (#1374 via hamish-omny)
+- add: sentinel support (#1067 via shadim; #692 via lexxdark)
+- add: `IAsyncEnumerable<T>` scanning APIs now supported (#1087)
+- add: new API for use with misbehaving sync-contexts ([more info](https://stackexchange.github.io/StackExchange.Redis/ThreadTheft))
+- add: `TOUCH` support (#1291 via gkorland)
+- add: `Condition` API (transactions) now supports `SortedSetLengthEqual` (#1332 via phosphene47)
+- add: `SocketManager` is now more configurable (#1115, via naile)
+- add: NRediSearch updated in line with JRediSearch (#1267, via tombatron; #1199 via oruchreis)
+- add: support for `CheckCertificatRevocation` configuration (#1234, via BLun78 and V912736)
+- add: more details about exceptions (#1190, via marafiq)
+- add: new stream APIs (#1141 and #1154 via ttingen)
+- add: event-args now mockable (#1326 via n1l)
+- fix: no-op when adding 0 values to a set (#1283 via omeaart)
+- add: support for `LATENCY` and `MEMORY` (#1204)
+- add: support for `HSTRLEN` (#1241 via eitanhs)
+- add: `GeoRadiusResult` is now mockable (#1175 via firenero)
+- fix: various documentation fixes (#1162, #1135, #1203, #1240, #1245, #1159, #1311, #1339, #1336)
+- fix: rare race-condition around exception data (#1342)
+- fix: `ScriptEvaluateAsync` keyspace isolation (#1377 via gliljas)
+- fix: F# compatibility enhancements (#1386)
+- fix: improved `ScriptResult` null support (#1392)
+- fix: error with DNS resolution breaking endpoint iterator (#1393)
+- tests: better docker support for tests (#1389 via ejsmith; #1391)
+- tests: general test improvements (#1183, #1385, #1384)
+
+## 2.0.601
+
+- add: tracking for current and next messages to help with debugging timeout issues - helpful in cases of large pipeline blockers
+
 ## 2.0.600
 
-- add `ulong` support to `RedisValue` and `RedisResult` (#1103)
+- add: `ulong` support to `RedisValue` and `RedisResult` (#1103)
 - fix: remove odd equality: `"-" != 0` (we do, however, still allow `"-0"`, as that is at least semantically valid, and is logically `== 0`) (related to #1103)
 - performance: rework how pub/sub queues are stored - reduces delegate overheads (related to #1101)
 - fix #1108 - ensure that we don't try appending log data to the `TextWriter` once we've returned from a method that accepted one
@@ -64,7 +135,7 @@ The key focus of this release is stability and reliability.
 - removed: the `HighPriority` (queue-jumping) flag is now deprecated
 - internal: most buffers internally now make use of pooled memory; `RedisValue` no longer pre-emptively allocates buffers
 - internal: added new custom thread-pool for handling async continuations to avoid thread-pool starvation issues
-- intenal: all IL generation has been removed; the library should now work on platforms that do not allow runtime-emit
+- internal: all IL generation has been removed; the library should now work on platforms that do not allow runtime-emit
 - added: asynchronous operations now have full support for reporting timeouts
 - added: new APIs now exist to work with pooled memory without allocations - `RedisValue.CreateFrom(MemoryStream)` and `operator` support for `Memory<byte>` and `ReadOnlyMemory<byte>`; and `IDatabase.StringGetLease[Async](...)`, `IDatabase.HashGetLease[Async](...)`, `Lease<byte>.AsStream()`)
 - added: ["streams"](https://redis.io/topics/streams-intro) support (thanks to [ttingen](https://github.com/ttingen) for their contribution)
